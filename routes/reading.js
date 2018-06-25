@@ -1,33 +1,25 @@
 require('es6-promise').polyfill()
 require('isomorphic-fetch')
+let { buildIssueInfo } = require('../module/issue')
 
+let pagesPerHour = 60
 module.exports = (app) => {
   app.post('/reading', (req, res) => {
-      const { ZENHUB_TOKEN, REPO_ID, GITHUB_TOKEN } = req.webtaskContext.secrets
-    console.log(req.webtaskContext.secrets)
       const { action, issue } = req.body
-      const { url, html_url, number } = issue
 
       console.log(`[BEGIN] issue updated with action: ${action}`)
-
       if (action === 'opened') {
-        fetch(`${url}?access_token=${GITHUB_TOKEN}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ milestone: 3 })
-        }).then(
-          () => console.info(`[END] set milestone successful! ${html_url}`),
-          (e) => res.json(e),
-        )
-      } else if (action === 'milestoned') {
-        let url = 'https://'+`api.zenhub.io/p1/repositories/${REPO_ID}/issues/${number}/estimate?access_token=${ZENHUB_TOKEN}`
-        let body = JSON.stringify({ estimate: 1 })
-        let headers = { 'Content-Type': 'application/json' }
-        console.log(url)
-        fetch(url, { method: 'PUT', headers , body }).then(
-          () => console.log(`[END] Set estimate successful! ${html_url}`),
-          (e) => console.error(`[END] Failed to set estimate! ${html_url}`, e),
-        )
+        buildIssueInfo(issue, { milestone: 3 })
+          .then(function (data) {
+            console.log(data)
+            let hours = 1
+            if (data.pages) {
+              hours = Math.ceil(data.pages/pagesPerHour)
+              delete data.pages
+            }
+            setIssueStoryPoint(issue, hours, req.webtaskContext.secrets)
+            updateIssueInfo(issue, data, req.webtaskContext.secrets)
+          })
       }
 
       res.json({ message: 'issue updated!' })
@@ -112,4 +104,24 @@ module.exports = (app) => {
       })
       .catch(err => res.json('error', { error: err }))
   })
+}
+
+function updateIssueInfo (issue, data, { GITHUB_TOKEN }) {
+  fetch(`${issue.url}?access_token=${GITHUB_TOKEN}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  }).then(
+    () => console.info(`[END] set milestone successful! ${issue.number}`),
+  )
+}
+
+function setIssueStoryPoint (issue, point, { ZENHUB_TOKEN, REPO_ID }) {
+  let url = 'https://'+`api.zenhub.io/p1/repositories/${REPO_ID}/issues/${issue.number}/estimate?access_token=${ZENHUB_TOKEN}`
+  let body = JSON.stringify({ estimate: point })
+  let headers = { 'Content-Type': 'application/json' }
+  fetch(url, { method: 'PUT', headers , body }).then(
+    () => console.log(`[END] Set estimate successful! ${issue.id}`),
+    (e) => console.error(`[END] Failed to set estimate! ${issue.id}`, e),
+  )
 }
